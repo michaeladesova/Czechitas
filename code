@@ -1,0 +1,78 @@
+/****** Script for SelectTopNRows command from SSMS  ******/
+DROP TABLE IF EXISTS #CampaignTmp
+SELECT [CmpId]
+      ,[dimSalesUnitBk]
+      ,[PrimaryCategoryName]
+      ,indicatorvalue
+      ,State
+      into #CampaignTmp
+  FROM [Czechitas].[dbo].[factCampaignEvaluation2] e
+  JOIN dimDates d ON e.cmpId = d.GeneratedId
+  
+
+  GROUP BY [CmpId]
+      ,[dimSalesUnitBk]
+      ,[PrimaryCategoryName]
+      ,indicatorvalue
+      ,State
+
+DROP TABLE IF EXISTS #tmpOrderLine
+Select 
+       SUM([Quantity]                       )  as [Quantity]                    
+      ,SUM([SalesValueCZK]                  )  as [SalesValueCZK]                
+      ,SUM([SalesValueCZK_withDiscount]     )  as [SalesValueCZK_withDiscount]
+      ,SUM([SalesValueEUR]                  )  as [SalesValueEUR]                
+      ,SUM([SalesValueEUR_withDiscount]     )  as [SalesValueEUR_withDiscount]
+      ,[dimSalesUnitDwId]
+      ,[dimProductDwId]
+      ,DATETIMEFROMPARTS(DateKey / 10000, DateKey % 10000 / 100, DateKey % 100, 0, 0, 0, 0) AS Date
+      
+      into #tmpOrderLine
+
+FROM [DWH_STORE].[mat].[factOrderLine_EU] ol 
+
+WHERE Realized = 1 AND datekey >= 2021
+GROUP BY [dimSalesUnitDwId]
+      ,[dimProductDwId]
+      ,DATETIMEFROMPARTS(DateKey / 10000, DateKey % 10000 / 100, DateKey % 100, 0, 0, 0, 0)
+
+
+DROP TABLE IF EXISTS #tmpCategory
+Select 
+       SUM([Quantity]                           )  as [Quantity]                  
+      ,SUM([SalesValueCZK]                      )  as [SalesValueCZK]             
+      ,SUM([SalesValueCZK_withDiscount]         )  as [SalesValueCZK_withDiscount]
+      ,SUM([SalesValueEUR]                      )  as [SalesValueEUR]             
+      ,SUM([SalesValueEUR_withDiscount]         )  as [SalesValueEUR_withDiscount]
+      ,[dimSalesUnitDwId]
+      ,p.PrimaryCategoryName
+      ,Date
+      Into #tmpCategory
+FROM #tmpOrderLine ol
+JOIN [DWH_STORE].[czechitas].[dimProduct] p ON p.dimProductDwId = ol.dimProductDwId 
+
+WHERE p.ProductCategory not like '[G,L,P,R,S,T]%' 
+GROUP BY 
+       [dimSalesUnitDwId]
+      ,p.PrimaryCategoryName
+      ,Date
+
+DROP TABLE IF EXISTS #tmpFinal
+
+Select [CmpId]
+      ,cam.[dimSalesUnitBk]
+      ,cam.[PrimaryCategoryName]
+      ,State
+      ,SUM([Quantity]) AS Quantity
+      ,SUM([SalesValueCZK]) As SalesValueCZK
+      ,SUM([SalesValueCZK_withDiscount]) AS SalesValueCZK_withDiscount
+      ,SUM([SalesValueEUR]) AS SalesValueEUR
+      ,SUM([SalesValueEUR_withDiscount]) AS SalesValueEUR_withDiscount
+      into #tmpFinal
+FROM #CampaignTmp cam
+JOIN [DWH_STORE].[czechitas].[dimSalesUnit] su ON cam.[dimSalesUnitBk] = su.dimSalesUnitBk
+JOIN #tmpCategory cat ON cat.dimSalesUnitDwId = su.dimSalesUnitDwId AND cat.Date = cam.indicatorvalue AND cat.PrimaryCategoryName = cam.PrimaryCategoryName
+GROUP BY [CmpId]
+      ,cam.[dimSalesUnitBk]
+      ,cam.[PrimaryCategoryName]
+      ,State
